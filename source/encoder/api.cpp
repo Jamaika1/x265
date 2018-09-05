@@ -30,10 +30,7 @@
 #include "level.h"
 #include "nal.h"
 #include "bitcost.h"
-
-#if ENABLE_LIBVMAF
-#include "libvmaf.h"
-#endif
+#include "frameencoder.h"
 
 /* multilib namespace reflectors */
 #if LINKED_8BIT
@@ -64,6 +61,31 @@ extern "C" {
 #else
 /* these functions exist within private namespace (multilib) */
 namespace X265_NS {
+#endif
+
+#if ENABLE_LIBVMAF
+int FrameEncoder::vmaf_param_default_tune(const char* tune)
+{
+if (tune)
+    {
+    static int i;
+    if (!strcmp(tune, "vmaf"))
+        {
+            printf("x265 [info]: VMAF Development Kit (VDK) Version 1.3.9\n");
+            i = 1;
+        }
+    else
+    if (!strcmp(tune, "famv") && i == 1)
+        {
+            vmafFrameLevelScore();
+        }
+    else
+        return -1;
+    }
+        return 0;
+}
+
+#include "../libvmaf/libvmaf.h"
 #endif
 
 static const char* summaryCSVHeader =
@@ -306,25 +328,26 @@ void x265_encoder_get_stats(x265_encoder *enc, x265_stats *outputStats, uint32_t
         encoder->fetchStats(outputStats, statsSizeBytes);
     }
 }
+
 #if ENABLE_LIBVMAF
 void x265_vmaf_encoder_log(x265_encoder* enc, int argc, char **argv, x265_param *param, x265_vmaf_data *vmafdata)
 {
-    if (enc)
-    {
-        Encoder *encoder = static_cast<Encoder*>(enc);
-        x265_stats stats;       
-        stats.aggregateVmafScore = x265_calculate_vmafscore(param, vmafdata);
-        if(vmafdata->reference_file)
-            fclose(vmafdata->reference_file);
-        if(vmafdata->distorted_file)
-            fclose(vmafdata->distorted_file);
-        if(vmafdata)
-            x265_free(vmafdata);
-        encoder->fetchStats(&stats, sizeof(stats));
-        int padx = encoder->m_sps.conformanceWindow.rightOffset;
-        int pady = encoder->m_sps.conformanceWindow.bottomOffset;
-        x265_csvlog_encode(encoder->m_param, &stats, padx, pady, argc, argv);
-    }
+            if (enc)
+            {
+                Encoder *encoder = static_cast<Encoder*>(enc);
+                x265_stats stats;
+                stats.aggregateVmafScore = x265_calculate_vmafscore(param, vmafdata);
+                if(vmafdata->reference_file)
+                    fclose(vmafdata->reference_file);
+                if(vmafdata->distorted_file)
+                    fclose(vmafdata->distorted_file);
+                if(vmafdata)
+                    x265_free(vmafdata);
+                encoder->fetchStats(&stats, sizeof(stats));
+                int padx = encoder->m_sps.conformanceWindow.rightOffset;
+                int pady = encoder->m_sps.conformanceWindow.bottomOffset;
+                x265_csvlog_encode(encoder->m_param, &stats, padx, pady, argc, argv);
+            }
 }
 #endif
 
@@ -333,7 +356,7 @@ void x265_encoder_log(x265_encoder* enc, int argc, char **argv)
     if (enc)
     {
         Encoder *encoder = static_cast<Encoder*>(enc);
-        x265_stats stats;       
+        x265_stats stats;
         encoder->fetchStats(&stats, sizeof(stats));
         int padx = encoder->m_sps.conformanceWindow.rightOffset;
         int pady = encoder->m_sps.conformanceWindow.bottomOffset;
@@ -950,7 +973,7 @@ FILE* x265_csvlog_open(const x265_param* param)
                     fprintf(csvfp, ", DecideWait (ms), Row0Wait (ms), Wall time (ms), Ref Wait Wall (ms), Total CTU time (ms),"
                         "Stall Time (ms), Total frame time (ms), Avg WPP, Row Blocks");
 #if ENABLE_LIBVMAF
-                    fprintf(csvfp, ", VMAF Frame Score");
+    fprintf(csvfp, ", VMAF Frame Score");
 #endif
                 }
                 fprintf(csvfp, "\n");
@@ -961,7 +984,7 @@ FILE* x265_csvlog_open(const x265_param* param)
                 if (param->csvLogLevel >= 2 || param->maxCLL || param->maxFALL)
                     fputs("MaxCLL, MaxFALL,", csvfp);
 #if ENABLE_LIBVMAF
-                fputs(" Aggregate VMAF Score,", csvfp);
+    fputs(" Aggregate VMAF Score,", csvfp);
 #endif
                 fputs(" Version\n", csvfp);
             }
@@ -1073,7 +1096,7 @@ void x265_csvlog_frame(const x265_param* param, const x265_picture* pic)
 
         fprintf(param->csvfpt, " %.3lf, %d", frameStats->avgWPP, frameStats->countRowBlocks);
 #if ENABLE_LIBVMAF
-        fprintf(param->csvfpt, ", %lf", frameStats->vmafFrameScore);
+                fprintf(param->csvfpt, ", %lf", frameStats->vmafFrameScore);
 #endif
     }
     fprintf(param->csvfpt, "\n");
@@ -1094,7 +1117,7 @@ void x265_csvlog_encode(const x265_param *p, const x265_stats *stats, int padx, 
             if (p->csvLogLevel >= 2 || p->maxCLL || p->maxFALL)
                 fputs("MaxCLL, MaxFALL,", p->csvfpt);
 #if ENABLE_LIBVMAF
-            fputs(" Aggregate VMAF score,", p->csvfpt);
+                fputs(" Aggregate VMAF score,", p->csvfpt);
 #endif
             fputs(" Version\n",p->csvfpt);
 
@@ -1192,7 +1215,7 @@ void x265_csvlog_encode(const x265_param *p, const x265_stats *stats, int padx, 
         if (p->csvLogLevel >= 2 || p->maxCLL || p->maxFALL)
             fprintf(p->csvfpt, " %-6u, %-6u,", stats->maxCLL, stats->maxFALL);
 #if ENABLE_LIBVMAF
-        fprintf(p->csvfpt, " %lf,", stats->aggregateVmafScore);
+                fprintf(p->csvfpt, " %lf,", stats->aggregateVmafScore);
 #endif
         fprintf(p->csvfpt, " %s\n", api->version_str);
 
@@ -1290,6 +1313,7 @@ void x265_dither_image(x265_picture* picIn, int picWidth, int picHeight, int16_t
 /* Read y values of single frame for 8-bit input */
 int read_image_byte(FILE *file, float *buf, int width, int height, int stride)
 {
+//    file = fopen ("recon.yuv" , "rb");
     char *byte_ptr = (char *)buf;
     unsigned char *tmp_buf = 0;
     int i, j;
@@ -1300,30 +1324,25 @@ int read_image_byte(FILE *file, float *buf, int width, int height, int stride)
         goto fail_or_end;
     }
 
+
     if (!(tmp_buf = (unsigned char*)malloc(width)))
     {
         goto fail_or_end;
     }
-
     for (i = 0; i < height; ++i)
     {
         float *row_ptr = (float *)byte_ptr;
-
         if (fread(tmp_buf, 1, width, file) != (size_t)width)
         {
             goto fail_or_end;
         }
-
         for (j = 0; j < width; ++j)
         {
             row_ptr[j] = tmp_buf[j];
         }
-
         byte_ptr += stride;
     }
-
     ret = 0;
-
 fail_or_end:
     free(tmp_buf);
     return ret;
@@ -1331,155 +1350,123 @@ fail_or_end:
 /* Read y values of single frame for 10-bit input */
 int read_image_word(FILE *file, float *buf, int width, int height, int stride)
 {
+//    file = fopen ("recon10le.yuv" , "rb");
     char *byte_ptr = (char *)buf;
     unsigned short *tmp_buf = 0;
     int i, j;
     int ret = 1;
-
     if (width <= 0 || height <= 0)
     {
         goto fail_or_end;
     }
-
     if (!(tmp_buf = (unsigned short*)malloc(width * 2))) // '*2' to accommodate words
     {
         goto fail_or_end;
     }
-
     for (i = 0; i < height; ++i)
     {
         float *row_ptr = (float *)byte_ptr;
-
         if (fread(tmp_buf, 2, width, file) != (size_t)width) // '2' for word
         {
             goto fail_or_end;
         }
-
         for (j = 0; j < width; ++j)
         {
             row_ptr[j] = tmp_buf[j] / 4.0; // '/4' to convert from 10 to 8-bit
         }
-
         byte_ptr += stride;
     }
-
     ret = 0;
-
 fail_or_end:
     free(tmp_buf);
     return ret;
 }
-
 int read_frame(float *reference_data, float *distorted_data, float *temp_data, int stride_byte, void *s)
 {
     x265_vmaf_data *user_data = (x265_vmaf_data *)s;
     int ret;
-
+    printf("Image bitdepth: %u\n", user_data->internalBitDepth);
+    printf("Image size: %ux%u\n", user_data->width, user_data->height);
+    printf("Ref file: %s\n", user_data->reference_file);
+    if (user_data->internalBitDepth == 8) {
     // read reference y
-    if (user_data->internalBitDepth == 8)
-    {
         ret = read_image_byte(user_data->reference_file, reference_data, user_data->width, user_data->height, stride_byte);
-    }
-    else if (user_data->internalBitDepth == 10)
-    {
-        ret = read_image_word(user_data->reference_file, reference_data, user_data->width, user_data->height, stride_byte);
-    }
-    else
-    {
-        x265_log(NULL, X265_LOG_ERROR, "Invalid bitdepth\n");
-        return 1;
-    }
-    if (ret)
-    {
-        if (feof(user_data->reference_file))
+        if (ret)
         {
-            ret = 2; // OK if end of file
+            if (feof(user_data->reference_file))
+            {
+                ret = 2; // OK if end of file
+            }
+            return ret;
         }
-        return ret;
-    }
 
-    // read distorted y
-    if (user_data->internalBitDepth == 8)
-    {
+        // read distorted y
         ret = read_image_byte(user_data->distorted_file, distorted_data, user_data->width, user_data->height, stride_byte);
-    }
-    else if (user_data->internalBitDepth == 10)
-    {
-        ret = read_image_word(user_data->distorted_file, distorted_data, user_data->width, user_data->height, stride_byte);
-    }
-    else
-    {
-        x265_log(NULL, X265_LOG_ERROR, "Invalid bitdepth\n");
-        return 1;
-    }
-    if (ret)
-    {
-        if (feof(user_data->distorted_file))
+        if (ret)
         {
-            ret = 2; // OK if end of file
+            if (feof(user_data->distorted_file))
+            {
+                ret = 2; // OK if end of file
+            }
+            return ret;
         }
-        return ret;
-    }
-
-    // reference skip u and v
-    if (user_data->internalBitDepth == 8)
-    {
+        // reference skip u and v
         if (fread(temp_data, 1, user_data->offset, user_data->reference_file) != (size_t)user_data->offset)
         {
             x265_log(NULL, X265_LOG_ERROR, "reference fread to skip u and v failed.\n");
             goto fail_or_end;
         }
-    }
-    else if (user_data->internalBitDepth == 10)
-    {
-        if (fread(temp_data, 2, user_data->offset, user_data->reference_file) != (size_t)user_data->offset)
-        {
-            x265_log(NULL, X265_LOG_ERROR, "reference fread to skip u and v failed.\n");
-            goto fail_or_end;
-        }
-    }
-    else
-    {
-        x265_log(NULL, X265_LOG_ERROR, "Invalid format\n");
-        goto fail_or_end;
-    }
-
-    // distorted skip u and v
-    if (user_data->internalBitDepth == 8)
-    {
+        // distorted skip u and v
         if (fread(temp_data, 1, user_data->offset, user_data->distorted_file) != (size_t)user_data->offset)
         {
             x265_log(NULL, X265_LOG_ERROR, "distorted fread to skip u and v failed.\n");
             goto fail_or_end;
         }
     }
-    else if (user_data->internalBitDepth == 10)
-    {
+    if (user_data->internalBitDepth == 10) {
+        // read reference y
+        ret = read_image_word(user_data->reference_file, reference_data, user_data->width, user_data->height, stride_byte);
+        if (ret)
+        {
+            if (feof(user_data->reference_file))
+            {
+                ret = 2; // OK if end of file
+            }
+            return ret;
+        }
+        // read distorted y
+        ret = read_image_word(user_data->distorted_file, distorted_data, user_data->width, user_data->height, stride_byte);
+        if (ret)
+        {
+            if (feof(user_data->distorted_file))
+            {
+                ret = 2; // OK if end of file
+            }
+            return ret;
+        }
+        // reference skip u and v
+        if (fread(temp_data, 2, user_data->offset, user_data->reference_file) != (size_t)user_data->offset)
+        {
+            x265_log(NULL, X265_LOG_ERROR, "reference fread to skip u and v failed.\n");
+            goto fail_or_end;
+        }
+        // distorted skip u and v
         if (fread(temp_data, 2, user_data->offset, user_data->distorted_file) != (size_t)user_data->offset)
         {
             x265_log(NULL, X265_LOG_ERROR, "distorted fread to skip u and v failed.\n");
             goto fail_or_end;
         }
     }
-    else
-    {
-        x265_log(NULL, X265_LOG_ERROR, "Invalid format\n");
-        goto fail_or_end;
-    }
-
-
 fail_or_end:
     return ret;
 }
-
 double x265_calculate_vmafscore(x265_param *param, x265_vmaf_data *data)
 {
     double score;
-    
     data->width = param->sourceWidth;
     data->height = param->sourceHeight;
     data->internalBitDepth = param->internalBitDepth;
-   
+    printf("Image bitdepth: %u\n", param->internalBitDepth);
     if (param->internalCsp == X265_CSP_I420)
     {
         if ((param->sourceWidth * param->sourceHeight) % 2 != 0)
@@ -1492,32 +1479,34 @@ double x265_calculate_vmafscore(x265_param *param, x265_vmaf_data *data)
         data->offset = param->sourceWidth * param->sourceHeight * 2;
     else
         x265_log(NULL, X265_LOG_ERROR, "Invalid format\n");
-  
-    compute_vmaf(&score, vcd->format, data->width, data->height, read_frame, data, vcd->model_path, vcd->log_path, vcd->log_fmt, vcd->disable_clip, vcd->disable_avx, vcd->enable_transform, vcd->phone_model, vcd->psnr, vcd->ssim, vcd->ms_ssim, vcd->pool); 
-
+    if (param->internalBitDepth == 8)
+    {
+        if (param->internalCsp == X265_CSP_I420) compute_vmaf(&score, vcd_yuv420p->format, data->width, data->height, read_frame, data, vcd_yuv420p->model_path, vcd_yuv420p->log_path, vcd_yuv420p->log_fmt, vcd_yuv420p->disable_clip, vcd_yuv420p->disable_avx, vcd_yuv420p->enable_transform, vcd_yuv420p->phone_model, vcd_yuv420p->psnr, vcd_yuv420p->ssim, vcd_yuv420p->ms_ssim, vcd_yuv420p->pool, vcd_yuv420p->n_thread, vcd_yuv420p->n_subsample, vcd_yuv420p->enable_conf_interval);
+        if (param->internalCsp == X265_CSP_I422) compute_vmaf(&score, vcd_yuv422p->format, data->width, data->height, read_frame, data, vcd_yuv422p->model_path, vcd_yuv422p->log_path, vcd_yuv422p->log_fmt, vcd_yuv422p->disable_clip, vcd_yuv422p->disable_avx, vcd_yuv422p->enable_transform, vcd_yuv422p->phone_model, vcd_yuv422p->psnr, vcd_yuv422p->ssim, vcd_yuv422p->ms_ssim, vcd_yuv422p->pool, vcd_yuv422p->n_thread, vcd_yuv422p->n_subsample, vcd_yuv422p->enable_conf_interval);
+        if (param->internalCsp == X265_CSP_I444) compute_vmaf(&score, vcd_yuv444p->format, data->width, data->height, read_frame, data, vcd_yuv444p->model_path, vcd_yuv444p->log_path, vcd_yuv444p->log_fmt, vcd_yuv444p->disable_clip, vcd_yuv444p->disable_avx, vcd_yuv444p->enable_transform, vcd_yuv444p->phone_model, vcd_yuv444p->psnr, vcd_yuv444p->ssim, vcd_yuv444p->ms_ssim, vcd_yuv444p->pool, vcd_yuv444p->n_thread, vcd_yuv444p->n_subsample, vcd_yuv444p->enable_conf_interval);
+    }
+    if (param->internalBitDepth == 10)
+    {
+        if (param->internalCsp == X265_CSP_I420) compute_vmaf(&score, vcd_yuv420p10->format, data->width, data->height, read_frame, data, vcd_yuv420p10->model_path, vcd_yuv420p10->log_path, vcd_yuv420p10->log_fmt, vcd_yuv420p10->disable_clip, vcd_yuv420p10->disable_avx, vcd_yuv420p10->enable_transform, vcd_yuv420p10->phone_model, vcd_yuv420p10->psnr, vcd_yuv420p10->ssim, vcd_yuv420p10->ms_ssim, vcd_yuv420p10->pool, vcd_yuv420p10->n_thread, vcd_yuv420p10->n_subsample, vcd_yuv420p10->enable_conf_interval);
+        if (param->internalCsp == X265_CSP_I422) compute_vmaf(&score, vcd_yuv422p10->format, data->width, data->height, read_frame, data, vcd_yuv422p10->model_path, vcd_yuv422p10->log_path, vcd_yuv422p10->log_fmt, vcd_yuv422p10->disable_clip, vcd_yuv422p10->disable_avx, vcd_yuv422p10->enable_transform, vcd_yuv422p10->phone_model, vcd_yuv422p10->psnr, vcd_yuv422p10->ssim, vcd_yuv422p10->ms_ssim, vcd_yuv422p10->pool, vcd_yuv422p10->n_thread, vcd_yuv422p10->n_subsample, vcd_yuv422p10->enable_conf_interval);
+        if (param->internalCsp == X265_CSP_I444) compute_vmaf(&score, vcd_yuv444p10->format, data->width, data->height, read_frame, data, vcd_yuv444p10->model_path, vcd_yuv444p10->log_path, vcd_yuv444p10->log_fmt, vcd_yuv444p10->disable_clip, vcd_yuv444p10->disable_avx, vcd_yuv444p10->enable_transform, vcd_yuv444p10->phone_model, vcd_yuv444p10->psnr, vcd_yuv444p10->ssim, vcd_yuv444p10->ms_ssim, vcd_yuv444p10->pool, vcd_yuv444p10->n_thread, vcd_yuv444p10->n_subsample, vcd_yuv444p10->enable_conf_interval);
+    }
+    printf("Image chroma subsampling: %u\n", param->internalCsp);
     return score;
 }
-
 int read_frame_10bit(float *reference_data, float *distorted_data, float *temp_data, int stride, void *s)
 {
     x265_vmaf_framedata *user_data = (x265_vmaf_framedata *)s;
-
     PicYuv *reference_frame = (PicYuv *)user_data->reference_frame;
     PicYuv *distorted_frame = (PicYuv *)user_data->distorted_frame;
-
     if(!user_data->frame_set) {
- 
         int reference_stride = reference_frame->m_stride;
         int distorted_stride = distorted_frame->m_stride;
-
-        const uint16_t *reference_ptr = (const uint16_t *)reference_frame->m_picOrg[0]; 
+        const uint16_t *reference_ptr = (const uint16_t *)reference_frame->m_picOrg[0];
         const uint16_t *distorted_ptr = (const uint16_t *)distorted_frame->m_picOrg[0];
-
         temp_data = reference_data;
-
         int height = user_data->height;
-        int width = user_data->width; 
-
+        int width = user_data->width;
         int i,j;
         for (i = 0; i < height; i++) {
             for ( j = 0; j < width; j++) {
@@ -1526,7 +1515,6 @@ int read_frame_10bit(float *reference_data, float *distorted_data, float *temp_d
             reference_ptr += reference_stride;
             temp_data += stride / sizeof(*temp_data);
         }
-        
         temp_data = distorted_data;
         for (i = 0; i < height; i++) {
             for (j = 0; j < width; j++) {
@@ -1535,33 +1523,24 @@ int read_frame_10bit(float *reference_data, float *distorted_data, float *temp_d
             distorted_ptr += distorted_stride;
             temp_data += stride / sizeof(*temp_data);
         }
-
         user_data->frame_set = 1;
         return 0;
-    }                                                             
-    return 2;                                                               
+    }
+    return 2;
 }
-
 int read_frame_8bit(float *reference_data, float *distorted_data, float *temp_data, int stride, void *s)
 {
     x265_vmaf_framedata *user_data = (x265_vmaf_framedata *)s;
-
     PicYuv *reference_frame = (PicYuv *)user_data->reference_frame;
     PicYuv *distorted_frame = (PicYuv *)user_data->distorted_frame;
-
     if(!user_data->frame_set) {
-
         int reference_stride = reference_frame->m_stride;
         int distorted_stride = distorted_frame->m_stride;
-
-        const uint8_t *reference_ptr = (const uint8_t *)reference_frame->m_picOrg[0]; 
+        const uint8_t *reference_ptr = (const uint8_t *)reference_frame->m_picOrg[0];
         const uint8_t *distorted_ptr = (const uint8_t *)distorted_frame->m_picOrg[0];
-
         temp_data = reference_data;
-
         int height = user_data->height;
-        int width = user_data->width; 
-
+        int width = user_data->width;
         int i,j;
         for (i = 0; i < height; i++) {
             for ( j = 0; j < width; j++) {
@@ -1570,7 +1549,6 @@ int read_frame_8bit(float *reference_data, float *distorted_data, float *temp_da
             reference_ptr += reference_stride;
             temp_data += stride / sizeof(*temp_data);
         }
-        
         temp_data = distorted_data;
         for (i = 0; i < height; i++) {
             for (j = 0; j < width; j++) {
@@ -1579,24 +1557,31 @@ int read_frame_8bit(float *reference_data, float *distorted_data, float *temp_da
             distorted_ptr += distorted_stride;
             temp_data += stride / sizeof(*temp_data);
         }
-
         user_data->frame_set = 1;
         return 0;
-    }                                                             
-    return 2;                                                               
+    }
+    return 2;
 }
-
 double x265_calculate_vmaf_framelevelscore(x265_vmaf_framedata *vmafframedata)
 {
-    double score; 
+    double score;
     int (*read_frame)(float *reference_data, float *distorted_data, float *temp_data,
                       int stride, void *s);
+    printf("Image bitdepth: %u\n", vmafframedata->internalBitDepth);
     if (vmafframedata->internalBitDepth == 8)
+    {
         read_frame = read_frame_8bit;
-    else
-        read_frame = read_frame_10bit;
-    compute_vmaf(&score, vcd->format, vmafframedata->width, vmafframedata->height, read_frame, vmafframedata, vcd->model_path, vcd->log_path, vcd->log_fmt, vcd->disable_clip, vcd->disable_avx, vcd->enable_transform, vcd->phone_model, vcd->psnr, vcd->ssim, vcd->ms_ssim, vcd->pool);
- 
+        if (vmafframedata->internalCsp == X265_CSP_I420) compute_vmaf(&score, vcd_yuv420p->format, vmafframedata->width, vmafframedata->height, read_frame, vmafframedata, vcd_yuv420p->model_path, vcd_yuv420p->log_path, vcd_yuv420p->log_fmt, vcd_yuv420p->disable_clip, vcd_yuv420p->disable_avx, vcd_yuv420p->enable_transform, vcd_yuv420p->phone_model, vcd_yuv420p->psnr, vcd_yuv420p->ssim, vcd_yuv420p->ms_ssim, vcd_yuv420p->pool, vcd_yuv420p->n_thread, vcd_yuv420p->n_subsample, vcd_yuv420p->enable_conf_interval);
+        if (vmafframedata->internalCsp == X265_CSP_I422) compute_vmaf(&score, vcd_yuv422p->format, vmafframedata->width, vmafframedata->height, read_frame, vmafframedata, vcd_yuv422p->model_path, vcd_yuv422p->log_path, vcd_yuv422p->log_fmt, vcd_yuv422p->disable_clip, vcd_yuv422p->disable_avx, vcd_yuv422p->enable_transform, vcd_yuv422p->phone_model, vcd_yuv422p->psnr, vcd_yuv422p->ssim, vcd_yuv422p->ms_ssim, vcd_yuv422p->pool, vcd_yuv422p->n_thread, vcd_yuv422p->n_subsample, vcd_yuv422p->enable_conf_interval);
+        if (vmafframedata->internalCsp == X265_CSP_I444) compute_vmaf(&score, vcd_yuv444p->format, vmafframedata->width, vmafframedata->height, read_frame, vmafframedata, vcd_yuv444p->model_path, vcd_yuv444p->log_path, vcd_yuv444p->log_fmt, vcd_yuv444p->disable_clip, vcd_yuv444p->disable_avx, vcd_yuv444p->enable_transform, vcd_yuv444p->phone_model, vcd_yuv444p->psnr, vcd_yuv444p->ssim, vcd_yuv444p->ms_ssim, vcd_yuv444p->pool, vcd_yuv444p->n_thread, vcd_yuv444p->n_subsample, vcd_yuv444p->enable_conf_interval);
+    }
+    if (vmafframedata->internalBitDepth == 10)
+    {
+        if (vmafframedata->internalCsp == X265_CSP_I420) compute_vmaf(&score, vcd_yuv420p10->format, vmafframedata->width, vmafframedata->height, read_frame, vmafframedata, vcd_yuv420p10->model_path, vcd_yuv420p10->log_path, vcd_yuv420p10->log_fmt, vcd_yuv420p10->disable_clip, vcd_yuv420p10->disable_avx, vcd_yuv420p10->enable_transform, vcd_yuv420p10->phone_model, vcd_yuv420p10->psnr, vcd_yuv420p10->ssim, vcd_yuv420p10->ms_ssim, vcd_yuv420p10->pool, vcd_yuv420p10->n_thread, vcd_yuv420p10->n_subsample, vcd_yuv420p10->enable_conf_interval);
+        if (vmafframedata->internalCsp == X265_CSP_I422) compute_vmaf(&score, vcd_yuv422p10->format, vmafframedata->width, vmafframedata->height, read_frame, vmafframedata, vcd_yuv422p10->model_path, vcd_yuv422p10->log_path, vcd_yuv422p10->log_fmt, vcd_yuv422p10->disable_clip, vcd_yuv422p10->disable_avx, vcd_yuv422p10->enable_transform, vcd_yuv422p10->phone_model, vcd_yuv422p10->psnr, vcd_yuv422p10->ssim, vcd_yuv422p10->ms_ssim, vcd_yuv422p10->pool, vcd_yuv422p10->n_thread, vcd_yuv422p10->n_subsample, vcd_yuv422p10->enable_conf_interval);
+        if (vmafframedata->internalCsp == X265_CSP_I444) compute_vmaf(&score, vcd_yuv444p10->format, vmafframedata->width, vmafframedata->height, read_frame, vmafframedata, vcd_yuv444p10->model_path, vcd_yuv444p10->log_path, vcd_yuv444p10->log_fmt, vcd_yuv444p10->disable_clip, vcd_yuv444p10->disable_avx, vcd_yuv444p10->enable_transform, vcd_yuv444p10->phone_model, vcd_yuv444p10->psnr, vcd_yuv444p10->ssim, vcd_yuv444p10->ms_ssim, vcd_yuv444p10->pool, vcd_yuv444p10->n_thread, vcd_yuv444p10->n_subsample, vcd_yuv444p10->enable_conf_interval);
+    }
+    printf("Image chroma subsampling: %u\n", vmafframedata->internalCsp);
     return score;
 }
 #endif
